@@ -41,6 +41,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     mapping(uint256 => uint256) public royaltyLengthMemory; // Key -> Batch ID  : Value -> Number of royalty parties (ex. artist1, artist2)
     mapping(uint256 => bool) public openMinting; // Key -> Batch ID  : Value -> minting open or not
     mapping(uint256 => uint256) tokenBatchPrice; // Key -> Batch ID  : Value -> price of Batch
+    mapping(uint256 => bool) public isSoldorBidded;
     //Batch end
     
     mapping(address => EnumerableSet.UintSet) internal tokensOwnedByWallet;
@@ -58,6 +59,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         bool isBidding;
         uint bidEnd;
         address seller;
+        bool isCountdown;
     }
     
     
@@ -113,6 +115,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     function addTokenBatchRoyalties(uint256 tokenBatchId, address[] memory _royaltyAddresses, uint256[] memory _royaltyPercentage) public creatorToken(tokenBatchId){
         require(_royaltyAddresses.length == _royaltyPercentage.length,"royaltyAddress not match royaltyPercentage length");
         require(_royaltyAddresses.length <= 5,"Maximum size exceeded");
+        require(isSoldorBidded[tokenBatchId] == false,"Token already sold or bidded");
         uint256 totalCollaboratorRoyalties;
         for(uint256 i=0; i<5; i++){
             if (i < _royaltyAddresses.length) { 
@@ -162,7 +165,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         uint256 tokenId;
         
         if (openMinting[tokenBatchId]) {
-            require(tokenBatchPrice[tokenBatchId] < msg.value,"Less Value sent");
+            require(tokenBatchPrice[tokenBatchId] <= msg.value,"Less Value sent");
             require(safeState <= tokenBatchEditionSize[tokenBatchId],"Max Batch capacity exceeded");   
             tokenId = totalSupply() + 1;
             _safeMint(msg.sender, tokenId);
@@ -262,10 +265,16 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     // Use : Start a bid
     // Input : Token ID and start price
     // Output : Emit bidStarted event by giving token ID, address, setting event to true, false(represents the creator), and time stamp
-    function startBid(uint _tokenId, uint256 _startPrice, uint _endTimestamp) public ownerToken(_tokenId){
+    function startBid(uint _tokenId, uint256 _startPrice, uint _endTimestamp, bool _isCountdown) public ownerToken(_tokenId){
         require(isSellings[_tokenId] == false,"Token on sale");                       //check if its not on sale
-        require(_endTimestamp > block.timestamp,"Extend EndTime");                    //Endtime should not be in past
-        require(_endTimestamp < (block.timestamp + 30 days),"Reduce the endtime");    //Cannot put auction for more than 1 month
+        if (_isCountdown == false) {
+            require(_endTimestamp > block.timestamp,"Extend EndTime");                    //Endtime should not be in past
+            require(_endTimestamp < (block.timestamp + 31 days),"Reduce the end time");    //Cannot put auction for more than 1 month
+        }
+        else{
+            require(_endTimestamp < 31 days,"Reduce the end days");
+        }
+        auctions[_tokenId].isCountdown = _isCountdown;
         auctions[_tokenId].bidEnd = _endTimestamp;
         auctions[_tokenId].isBidding = true; 
         auctions[_tokenId].bidPrice = _startPrice;
@@ -277,16 +286,22 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     // Input : Token ID
     // Output : Emit tokenBid event by giving token id, bidder adress, bid ammount, and timestamp
     function addBid(uint _tokenId) public payable{
-        require(auctions[_tokenId].bidEnd > block.timestamp,"Auction ended");    //Auction already ended 
         require(auctions[_tokenId].isBidding,"Auction ended");              
         require(msg.value > auctions[_tokenId].bidPrice,"Increase Bid");         //Bidprice lower than what was before
-        if (auctions[_tokenId].bidder == payable(address(0x0))){
+        if (auctions[_tokenId].bidder == payable(address(0x0))) {
+            if (auctions[_tokenId].isCountdown == false) {
+               require(auctions[_tokenId].bidEnd > block.timestamp,"Auction ended"); 
+            }    
+            else {
+                auctions[_tokenId].bidEnd += block.timestamp;
+            }
             auctions[_tokenId].bidder = payable(msg.sender);
             auctions[_tokenId].bidPrice = msg.value;
             auctions[_tokenId].isBidding = true;
             emit tokenBid(_tokenId, msg.sender, msg.value, block.timestamp);
         }
         else{
+            require(auctions[_tokenId].bidEnd > block.timestamp,"Auction ended");
             (bool success, ) = (auctions[_tokenId].bidder).call{value: auctions[_tokenId].bidPrice}("");
             if(success == false){
                 userBalance[auctions[_tokenId].bidder] += auctions[_tokenId].bidPrice;
@@ -341,6 +356,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         address payable royaltyPerson;
         uint256 royaltyPercent;
         uint256 x;
+        isSoldorBidded[referenceTotokenBatch[_tokenId]] = true;
         uint fee = (_price * percentageCut)/100;   //15 percentageCut fee = 15 ETH 
         totalMoney =totalMoney - fee;         //totalMoney = 85
         totalBalance += fee;                            
@@ -411,7 +427,20 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         require(auctions[_tokenId].bidEnd < block.timestamp,"Active Auction");
         require(auctions[_tokenId].bidder == msg.sender,"Not Bidder");
         require(auctions[_tokenId].isBidding,"Not on bidding");
-        return _buyToken(_tokenId, auctions[_tokenId].bidder, auctions[_tokenId].bidPrice, 2);
+        if(auctions[_tokenId].seller != ownerOf(_tokenId)) {
+            (bool success, ) = (auctions[_tokenId].bidder).call{value: auctions[_tokenId].bidPrice}("");
+            if(success == false){
+                userBalance[auctions[_tokenId].bidder] += auctions[_tokenId].bidPrice;
+            } 
+            auctions[_tokenId].bidder = payable(address(0x0));
+            auctions[_tokenId].bidPrice = 0;
+            auctions[_tokenId].isBidding = false;
+            auctions[_tokenId].seller = address(0x0);
+            emit bidStarted(_tokenId, msg.sender, false, 0, 0, false, block.timestamp);
+        }
+        else {
+            return _buyToken(_tokenId, auctions[_tokenId].bidder, auctions[_tokenId].bidPrice, 2);
+        }    
     }
     
     
