@@ -41,7 +41,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     mapping(uint256 => uint256) public royaltyLengthMemory; // Key -> Batch ID  : Value -> Number of royalty parties (ex. artist1, artist2)
     mapping(uint256 => bool) public openMinting; // Key -> Batch ID  : Value -> minting open or not
     mapping(uint256 => uint256) tokenBatchPrice; // Key -> Batch ID  : Value -> price of Batch
-    mapping(uint256 => bool) public isSoldorBidded;
+    mapping(uint256 => bool) public isSoldorBidded; // Key -> Batch ID  : Value -> bool (has any token of that batch been sold or auctioned)
     //Batch end
     
     mapping(address => EnumerableSet.UintSet) internal tokensOwnedByWallet;
@@ -52,10 +52,10 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     mapping(uint256 => uint256) public referenceTotokenBatch; //name : tokenIdToBatchId // Key -> Token ID  : Value -> Batch Id to which it belongs to
     mapping(uint256 => Auction) public auctions;
     //Token end
-
+    //Auction structure
     struct Auction {
         address payable bidder;
-        uint bidPrice;
+        uint bidPrice;  
         bool isBidding;
         uint bidEnd;
         address seller;
@@ -65,19 +65,21 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     
     
     //Event
-    event newTokenBatchCreated(string tokenHash, string tokenBatchName, uint256 editionSize, uint256 price, uint256 tokenBatchIndex, address creator);
+    event newTokenBatchCreated(string tokenHash, string tokenBatchName, uint256 editionSize, uint256 price, uint256 tokenBatchIndex, address creator, uint timestamp);
     event tokenCreated(uint indexed tokenId, address indexed tokenCreator, uint timestamp, uint indexed batchId);
     event tokenPutForSale(uint indexed tokenId, address indexed seller, uint sellPrice, bool isListed, uint timestamp);
     event tokenBid(uint indexed tokenId, address indexed bidder, uint tokenPrice, uint timestamp);
     event bidStarted(uint indexed tokenId, address indexed lister, bool isBid, uint tokenPrice, uint endTime, bool isClosedBySuperWorld, uint timestamp);
     event tokenBought(uint indexed tokenId, address indexed newowner, address indexed seller, uint timestamp, uint tokenPrice);
     //Event
-
+    
+    //only the owner of token allowed
     modifier ownerToken(uint256 tokenId) {
         require(ownerOf(tokenId) == msg.sender,"Not TokenOwner");
         _;
     }
     
+    //only the creator of token allowed
     modifier creatorToken(uint256 tokenBatchId) {
         require(tokenCreator[tokenBatchId] == msg.sender,"Not tokenCreator");
         _;
@@ -85,8 +87,8 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     
     // **
     // Use : Creates a token batch
-    // Input : token hash, batch name, edition size, price, and imageURL
-    // Output : New token batch with hash, name, size, price, and imageUrl
+    // Input : file hash, batch name, edition size, price, fileURL and thumbnailUrl
+    // Output : New token batch with file hash, name, size, price, fileURL and thumbnailUrl
     function createTokenBatch(string memory _tokenHash,  string memory _tokenBatchName,  uint256 _editionSize, uint256 _price, string memory _fileUrl, string memory _fileThumbnail) public returns(uint256) {
         tokenBatchIndex++;
         tokenBatchHash[tokenBatchIndex] = _tokenHash;
@@ -97,13 +99,13 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         fileUrl[tokenBatchIndex] = _fileUrl;
         thumbnail[tokenBatchIndex] = _fileThumbnail;
         tokenCreator[tokenBatchIndex] = msg.sender;
-        emit newTokenBatchCreated(_tokenHash, _tokenBatchName, _editionSize, _price, tokenBatchIndex, msg.sender);
+        emit newTokenBatchCreated(_tokenHash, _tokenBatchName, _editionSize, _price, tokenBatchIndex, msg.sender, block.timestamp);
         return tokenBatchIndex;
     }
 
     // Used for Opening/Closing a minting session where buyers can pay and mint stuffs directly at a price set by creator
     // Input : toke price, bool (True Opening minting session/False = Closing minting session)
-    // Output : Mintting status
+    // Output : Minting status
     function openCloseMint(uint256 tokenBatchToUpdate, uint256 _price, bool _isOpen) public creatorToken(tokenBatchToUpdate) {
         openMinting[tokenBatchToUpdate] = _isOpen;
         tokenBatchPrice[tokenBatchToUpdate] = _price;
@@ -147,7 +149,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     
 
     // Use : Minting new tokens from batch
-    // Input : Token Batch ID, minting amount
+    // Input : Token Batch ID, amount of tokens to mint
     // Output : minted token(s)
     function mintTokenBatch(uint256 tokenBatchId, uint256 amountToMint) public payable{
         for (uint i = 0 ; i<amountToMint; i++) {
@@ -156,7 +158,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     }
     
     // Use : Minting new tokens one at a time 
-    //      1: if openminting enabled buyers mint with the price the creator has set.
+    //      1: if openminting enabled buyers mint with the price the creator has set and the pay goes to the royalty and creator
     //      2: if openminting disabled only creator can mint
     // Input : Token Batch ID
     // Output : minted token(s)
@@ -211,7 +213,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     }
 
     // Use : List token for sell (If you want to resell you re-list or de-list also)
-    // Input : Token ID, selling price, is lisred should be true
+    // Input : Token ID, selling price, is listed should be true
     // Output : Token ID, sellprice, if it is listed, timestamp
     function sale(uint256 _tokenId, uint _sellPrice, bool isListed) public ownerToken(_tokenId) { 
         require(auctions[_tokenId].isBidding == false,"Token on bidding");
@@ -230,7 +232,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     // Use : Gets all information about the batch from the Token Batch ID
     // Input : Token Batch ID
     // Output : Token hash, token batch name, token batch edition size, token creator, and image URL
-    function getTokenBatchData(uint256 tokenBatchId) public view returns (uint256 _batchId, string memory _tokenHash, string memory _tokenBatchName, uint256 _unmintedEditions, address _tokenCreator, string memory _fileUrl, string memory _fileThumbnail, uint256 _mintedEditions) {
+    function getTokenBatchData(uint256 tokenBatchId) public view returns (uint256 _batchId, string memory _tokenHash, string memory _tokenBatchName, uint256 _unmintedEditions, address _tokenCreator, string memory _fileUrl, string memory _fileThumbnail, uint256 _mintedEditions, bool _openMinting, bool _isSoldorBidded, uint _tokenBatchPrice) {
         _batchId = tokenBatchId;
         _tokenHash = tokenBatchHash[tokenBatchId];
         _tokenBatchName = tokenBatchName[tokenBatchId];
@@ -238,7 +240,10 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         _mintedEditions = totalMintedTokens[tokenBatchId];
         _tokenCreator = tokenCreator[tokenBatchId];
         _fileUrl = fileUrl[tokenBatchId];
-        _fileThumbnail = thumbnail[tokenBatchId];
+        _fileThumbnail = thumbnail[tokenBatchId];  
+        _openMinting = openMinting[tokenBatchId];
+        _isSoldorBidded = isSoldorBidded[tokenBatchId];
+        _tokenBatchPrice = tokenBatchPrice[tokenBatchId];
     }
 
 
@@ -263,7 +268,8 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     }
 
     // Use : Start a bid
-    // Input : Token ID and start price
+    // Input : Token ID, start price, endtime of auction and type of auction 
+    //{isCountdown = true => auction starts for input time starting from first bid for endtime no. of days. if false auction ends on a end date}
     // Output : Emit bidStarted event by giving token ID, address, setting event to true, false(represents the creator), and time stamp
     function startBid(uint _tokenId, uint256 _startPrice, uint _endTimestamp, bool _isCountdown) public ownerToken(_tokenId){
         require(isSellings[_tokenId] == false,"Token on sale");                       //check if its not on sale
@@ -284,7 +290,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
 
     // Use : Add a bid to auction
     // Input : Token ID
-    // Output : Emit tokenBid event by giving token id, bidder adress, bid ammount, and timestamp
+    // Output : Emit tokenBid event by giving token id, bidder adress, bid ammount, and timestamp of event
     function addBid(uint _tokenId) public payable{
         require(auctions[_tokenId].isBidding,"Auction ended");              
         require(msg.value > auctions[_tokenId].bidPrice,"Increase Bid");         //Bidprice lower than what was before
@@ -312,7 +318,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         }
     }
 
-    // Use : Allows contract owner to close a bid an d give back the money to the bidder and token will be set not for auction anymore
+    // Use : Allows contract owner to close a bid and give back the money to the bidder and token will be set not for auction anymore
     //Pull pattern used if the transfer to the bidder was not possible ... they can use withdrawUserBalance
     // Input : Token ID
     // Output : Emit bidStarted event by giving token ID, address, sets bidding to false, true(represents SuperWorld) and, timestamp
@@ -349,7 +355,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     }
 
     // Use : Buy a token
-    // Input : Token ID, address that will be paid, cost amount, and 1(represents the creator)
+    // Input : Token ID, address that will be paid, cost amount, and 1(represents called by selling) or 2 (called by auction)
     // Output : Boolean
     function _buyToken(uint256 _tokenId, address payable addr, uint256 _price, uint8 _type) private returns(bool) {
         uint256 totalMoney = _price;             //100 Ethers
@@ -364,8 +370,8 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         uint priceAfterFee = totalMoney;                    //priceAfterFee = 85
         for (uint256 i=0; i<royaltyLengthMemory[batchId]; i++) {   // 20 30 10 15 25 = 100
             royaltyPerson = royaltyAddressMemory[batchId][i];
-            royaltyPercent = royaltyPercentageMemory[batchId][i];
-            x = (priceAfterFee * royaltyPercent)/100;
+            royaltyPercent = royaltyPercentageMemory[batchId][i];        // 10
+            x = (priceAfterFee * royaltyPercent)/100;                     //8.5
 
             totalMoney = totalMoney - x;
            // royaltyPerson.transfer(x);    //17 25.5 10 12.75 21.25 = 85
@@ -400,7 +406,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         return true;
     }
 
-    // Use : Close bid by owner of the token only
+    // Use : Close bid by owner of the token only.... the token sent to the highest bidder(if any) otherwise removed from being in auction
     // Input : Token ID
     // Output : Calls _buytoken function by giving Token ID, bidder,bid price, and 2(triggers a two in _buytoken function)
     function closeBidOwner(uint _tokenId) public ownerToken(_tokenId) returns(bool) {
@@ -420,7 +426,8 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
             return _buyToken(_tokenId, auctions[_tokenId].bidder, auctions[_tokenId].bidPrice, 2);
         }
     }
-     // Use : Close bid by bidder if the seller doen't close bid
+    // Use : Close bid by bidder if the seller doen't close bid 
+    //1. someone bought it on openseas -> bidder gets back money  2. owned by Starter of bid -> bidder gets token and prev owner gets money
     // Input : Token ID
     // Output : Calls _buytoken function by giving Token ID, bidder,bid price, and 2(triggers a two in _buytoken function)
     function closeBidBuyer(uint _tokenId) public returns(bool) {
@@ -456,7 +463,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
                 intString = string(abi.encodePacked(toString((EnumerableSet.at(tokensOwnedByWallet[_owner], j)))));
             }
          }
-        return intString;
+        return intString; 
     }
     
     // Use : Withdraw funds from smart contract owned by SW
