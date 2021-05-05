@@ -344,7 +344,54 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         return string(abi.encodePacked(metaUrl, toString(tokenId)));
 
     }
-
+     
+    function _beforeTokenTransfer(address from, address to, uint256 tokenId) internal virtual override {
+        super._beforeTokenTransfer(from, to, tokenId);
+        isSoldorBidded[referenceTotokenBatch[tokenId]] = true;
+        if(isSellings[tokenId] == true) {
+           isSellings[tokenId] = false;
+           sellPrices[tokenId] = 0;
+           emit tokenPutForSale(tokenId, from, 0, false, block.timestamp);
+        }
+        if (auctions[tokenId].bidder == payable(address(0x0))) {
+           auctions[tokenId].isBidding = false;
+           auctions[tokenId].bidPrice = 0;
+           auctions[tokenId].seller = address(0x0);
+           auctions[tokenId].bidEnd = 0;
+           auctions[tokenId].isCountdown = false;
+           emit bidStarted(tokenId, from, false, 0, 0, false, block.timestamp);
+        }
+        else if (auctions[tokenId].bidder != payable(address(0x0))) {
+           (bool success, ) = (auctions[tokenId].bidder).call{value: auctions[tokenId].bidPrice}("");
+            if(success == false){
+                userBalance[auctions[tokenId].bidder] += auctions[tokenId].bidPrice;
+            }
+            auctions[tokenId].bidder = payable(address(0x0));
+            auctions[tokenId].bidPrice = 0;
+            auctions[tokenId].isBidding = false;
+            auctions[tokenId].seller = address(0x0);
+            auctions[tokenId].bidEnd = 0;
+            auctions[tokenId].isCountdown = false;
+            emit bidStarted(tokenId, msg.sender, false, 0, 0, true, block.timestamp); 
+        }
+        
+            emit tokenBought(tokenId, from, to, block.timestamp,0); //price should b e emitted
+        
+        // For now, basePrice is a placeholder for the selling price of the token until we can find a way to
+        // actually access the price. In particular, we need a way to set sellPrices[tokenId] when listing on OpenSea.
+        //isSellings[tokenId] = false;
+        // recordTransaction(tokenId, basePrice);
+        // emitBuyTokenEvents(
+        //     tokenId,
+        //     lon,
+        //     lat,
+        //     to,
+        //     from,
+        //     basePrice,
+        //     now
+        // );
+        // sellPrices[tokenId] = basePrice;     
+    }
     // Use : Buy a token
     // Input : Token ID
     // Output : Calls _buyToken event by giving Token ID, address, buy amount, and 1(represents buy function)
@@ -355,7 +402,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     }
 
     // Use : Buy a token
-    // Input : Token ID, address that will be paid, cost amount, and 1(represents called by selling) or 2 (called by auction)
+    // Input : Token ID, address that will be paid, cost amount, and 1(represents called by selling) or 2 (called while in auction)
     // Output : Boolean
     function _buyToken(uint256 _tokenId, address payable addr, uint256 _price, uint8 _type) private returns(bool) {
         uint256 totalMoney = _price;             //100 Ethers
@@ -394,6 +441,8 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         auctions[_tokenId].bidder = payable(address(0x0));
         auctions[_tokenId].bidPrice = 0;
         auctions[_tokenId].seller = address(0x0);
+        auctions[_tokenId].bidEnd = 0;
+        auctions[_tokenId].isCountdown = false;
         if (_type == 2) {
             emit bidStarted(_tokenId, seller, false, 0, 0, false, block.timestamp);
         }
@@ -415,6 +464,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
             auctions[_tokenId].isBidding = false;
             auctions[_tokenId].bidPrice = 0;
             auctions[_tokenId].seller = address(0x0);
+            auctions[_tokenId].isCountdown = false;
             address _tokenOwner = ownerOf(_tokenId);
             emit bidStarted(_tokenId, _tokenOwner, false, 0, 0, false, block.timestamp);
             return true;
@@ -434,23 +484,23 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         require(auctions[_tokenId].bidEnd < block.timestamp,"Active Auction");
         require(auctions[_tokenId].bidder == msg.sender,"Not Bidder");
         require(auctions[_tokenId].isBidding,"Not on bidding");
-        if(auctions[_tokenId].seller != ownerOf(_tokenId)) {
-            (bool success, ) = (auctions[_tokenId].bidder).call{value: auctions[_tokenId].bidPrice}("");
-            if(success == false){
-                userBalance[auctions[_tokenId].bidder] += auctions[_tokenId].bidPrice;
-            } 
-            auctions[_tokenId].bidder = payable(address(0x0));
-            auctions[_tokenId].bidPrice = 0;
-            auctions[_tokenId].isBidding = false;
-            auctions[_tokenId].seller = address(0x0);
-            emit bidStarted(_tokenId, msg.sender, false, 0, 0, false, block.timestamp);
-        }
-        else {
+        // if(auctions[_tokenId].seller != ownerOf(_tokenId)) {
+        //     (bool success, ) = (auctions[_tokenId].bidder).call{value: auctions[_tokenId].bidPrice}("");
+        //     if(success == false){
+        //         userBalance[auctions[_tokenId].bidder] += auctions[_tokenId].bidPrice;
+        //     } 
+        //     auctions[_tokenId].bidder = payable(address(0x0));
+        //     auctions[_tokenId].bidPrice = 0;
+        //     auctions[_tokenId].isBidding = false;
+        //     auctions[_tokenId].seller = address(0x0);
+        //     emit bidStarted(_tokenId, msg.sender, false, 0, 0, false, block.timestamp);
+        // }
+        // else {
             return _buyToken(_tokenId, auctions[_tokenId].bidder, auctions[_tokenId].bidPrice, 2);
-        }    
+        //}    
     }
     
-    
+    // Use : Get Owned NFTs from wallet address
     function getOwnedNFTs(address _owner) public view returns(string memory) {
         uint len = EnumerableSet.length(tokensOwnedByWallet[_owner]);
         string memory intString;
@@ -497,8 +547,8 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
 
     function toString(uint256 _i)internal pure returns (string memory str){
         if (_i == 0){
-            return "0";
         }
+            return "0";
         uint256 j = _i;
         uint256 length;
         while (j != 0){
@@ -517,7 +567,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     }
     
     // Use : Converts an address to a string
-    // Input : Integer
+    // Input : Address
     // Output : String
     
     function toString(address _i) internal pure returns (string memory str){
@@ -526,7 +576,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     
     
     // Use : Converts an bool to a string
-    // Input : Integer
+    // Input : Bool
     // Output : String
 
     function toString(bool _i) internal pure returns (string memory str){
