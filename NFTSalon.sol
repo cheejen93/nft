@@ -353,6 +353,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
            sellPrices[tokenId] = 0;
            emit tokenPutForSale(tokenId, from, 0, false, block.timestamp);
         }
+        else if(auctions[tokenId].isBidding == true){
         if (auctions[tokenId].bidder == payable(address(0x0))) {
            auctions[tokenId].isBidding = false;
            auctions[tokenId].bidPrice = 0;
@@ -372,25 +373,12 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
             auctions[tokenId].seller = address(0x0);
             auctions[tokenId].bidEnd = 0;
             auctions[tokenId].isCountdown = false;
-            emit bidStarted(tokenId, msg.sender, false, 0, 0, true, block.timestamp); 
+            emit bidStarted(tokenId, from, false, 0, 0, true, block.timestamp); 
         }
+        }
+            emit tokenBought(tokenId, from, to, block.timestamp,0); //price should be emitted
         
-            emit tokenBought(tokenId, from, to, block.timestamp,0); //price should b e emitted
-        
-        // For now, basePrice is a placeholder for the selling price of the token until we can find a way to
-        // actually access the price. In particular, we need a way to set sellPrices[tokenId] when listing on OpenSea.
-        //isSellings[tokenId] = false;
-        // recordTransaction(tokenId, basePrice);
-        // emitBuyTokenEvents(
-        //     tokenId,
-        //     lon,
-        //     lat,
-        //     to,
-        //     from,
-        //     basePrice,
-        //     now
-        // );
-        // sellPrices[tokenId] = basePrice;     
+       
     }
     // Use : Buy a token
     // Input : Token ID
