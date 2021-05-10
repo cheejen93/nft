@@ -499,8 +499,8 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
 
     function toString(uint256 _i)internal pure returns (string memory str){
         if (_i == 0){
-        }
             return "0";
+           }
         uint256 j = _i;
         uint256 length;
         while (j != 0){
