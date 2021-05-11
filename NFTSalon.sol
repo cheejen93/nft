@@ -386,13 +386,13 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     function buyToken(uint256 _tokenId) public payable returns(bool) {
         require(isSellings[_tokenId],"Token not selling");
         require(msg.value >= sellPrices[_tokenId],"Add more value");
-        return _buyToken(_tokenId, payable(msg.sender), msg.value, 1);
+        return _buyToken(_tokenId, payable(msg.sender), msg.value);
     }
 
     // Use : Buy a token
     // Input : Token ID, address that will be paid, cost amount, and 1(represents called by selling) or 2 (called while in auction)
     // Output : Boolean
-    function _buyToken(uint256 _tokenId, address payable buyer, uint256 _price, uint8 _type) private returns(bool) {
+    function _buyToken(uint256 _tokenId, address payable buyer, uint256 _price) private returns(bool) {
         uint256 totalMoney = _price;             //100 Ethers
         address payable royaltyPerson;
         uint256 royaltyPercent;
@@ -438,7 +438,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
             require(auctions[_tokenId].seller == ownerOf(_tokenId),"Starter of bid not owner");
             require(auctions[_tokenId].bidEnd < block.timestamp,"Active Auction");
             require(auctions[_tokenId].isBidding,"Token not bidding");
-            return _buyToken(_tokenId, auctions[_tokenId].bidder, auctions[_tokenId].bidPrice, 2);
+            return _buyToken(_tokenId, auctions[_tokenId].bidder, auctions[_tokenId].bidPrice);
         }
     }
     // Use : Close bid by bidder if the seller doen't close bid 
@@ -449,7 +449,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
         require(auctions[_tokenId].bidEnd < block.timestamp,"Active Auction");
         require(auctions[_tokenId].bidder == msg.sender,"Not Bidder");
         require(auctions[_tokenId].isBidding,"Not on bidding");
-        return _buyToken(_tokenId, auctions[_tokenId].bidder, auctions[_tokenId].bidPrice, 2);
+        return _buyToken(_tokenId, auctions[_tokenId].bidder, auctions[_tokenId].bidPrice);
     }
     
     // Use : Get Owned NFTs from wallet address
@@ -500,7 +500,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
     function toString(uint256 _i)internal pure returns (string memory str){
         if (_i == 0){
             return "0";
-           }
+        }
         uint256 j = _i;
         uint256 length;
         while (j != 0){
