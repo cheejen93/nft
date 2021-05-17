@@ -375,7 +375,7 @@ contract NFTSalon is ERC721Enumerable, Ownable, ReentrancyGuard {
                 emit bidStarted(tokenId, from, false, 0, 0, true, block.timestamp); 
             }
         }
-        if(from == address(0x0)){
+        if(from != address(0x0)){
             emit tokenBought(tokenId, from, to, block.timestamp,price);
         }
         tokensOwnedByWallet[from].remove(tokenId);
